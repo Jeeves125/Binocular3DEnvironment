@@ -63,6 +63,9 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
         self.tuned_params_path = 'stereo_tuned_params.json'
         # Try to load previously tuned params
         self.load_tuned_params()
+        # Metric depth display options
+        self.metric_display_enabled = False
+        self.metric_display_max_m = 5.0  # default display scale (meters)
         # Ensemble matching and temporal options
         self.ensemble_enabled = False
         self.ensemble_block_sizes = [5,7,9]
@@ -362,6 +365,58 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
 
         return disp_left, disparity_normalized
 
+    def disparity_to_depth_meters(self, disp16):
+        """Convert raw disparity (int16, scale 16) to metric depth (meters).
+
+        Prefers using stereo reprojection matrix `Q` if present in loaded
+        `self.stereo_calibration`. Falls back to using `fx` and baseline `T`.
+        Returns a float32 array with meters and NaN for invalid pixels.
+        """
+        disp = disp16.astype(np.float32) / 16.0
+        min_disp = float(self.stereo.getMinDisparity())
+
+        # Prepare depth array filled with NaN for invalids
+        depth = np.full(disp.shape, np.nan, dtype=np.float32)
+
+        # Use Q if available (best option)
+        if self.stereo_calibration and isinstance(self.stereo_calibration, dict) and 'Q' in self.stereo_calibration:
+            try:
+                Q = self.stereo_calibration['Q']
+                points3D = cv2.reprojectImageTo3D(disp, Q)
+                depth = points3D[:, :, 2].astype(np.float32)
+                depth[disp <= min_disp] = np.nan
+                return depth
+            except Exception:
+                pass
+
+        # Fallback: need fx from intrinsics and baseline from stereo 'T'
+        if self.left_calibration[0] is not None and self.stereo_calibration and 'T' in self.stereo_calibration:
+            try:
+                fx = float(self.left_calibration[0][0, 0])
+                T = np.array(self.stereo_calibration['T']).astype(np.float32)
+                # baseline is translation along x between cameras
+                baseline = abs(float(T[0]))
+                # compute depth, avoid div by zero
+                depth = (fx * baseline) / (disp + 1e-6)
+                depth[disp <= min_disp] = np.nan
+                return depth
+            except Exception:
+                pass
+
+        raise RuntimeError("Need stereo Q or baseline+fx to compute metric depth.")
+
+    def depth_to_colormap(self, depth_m, max_m=None):
+        """Map a float32 depth map (meters) to a BGR colormap for display."""
+        max_m = max_m or self.metric_display_max_m
+        depth = depth_m.copy()
+        invalid = ~np.isfinite(depth)
+        depth[invalid] = 0.0
+        norm = np.clip(depth / float(max_m), 0.0, 1.0)
+        disp8 = (norm * 255.0).astype(np.uint8)
+        disp8[invalid] = 0
+        colored = cv2.applyColorMap(disp8, cv2.COLORMAP_JET)
+        return colored
+
     def auto_tune_on_frame(self, left_gray, right_gray, try_block_sizes=(5,7,9), try_num_disparities=(16*6,16*8,16*10)):
         """Quick automatic tuning of StereoSGBM on a single frame.
 
@@ -598,7 +653,15 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
             std_disp = float(vals.std()) if vals.size else 0.0
 
             # Apply colormap (grayscale BGR)
-            depth_color = self.apply_colormap(disp_display)
+            if self.metric_display_enabled:
+                try:
+                    depth_m = self.disparity_to_depth_meters(disp16)
+                    depth_color = self.depth_to_colormap(depth_m)
+                except Exception as e:
+                    print("Metric depth unavailable:", e)
+                    depth_color = self.apply_colormap(disp_display)
+            else:
+                depth_color = self.apply_colormap(disp_display)
 
             # Resize for display
             left_display = cv2.resize(left_frame, (320, 240))
@@ -647,6 +710,9 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
                 saved = self.save_tuned_params()
                 if saved:
                     print("Tuned parameters persisted.")
+            elif key == ord('D'):
+                self.metric_display_enabled = not self.metric_display_enabled
+                print(f"Metric depth display {'enabled' if self.metric_display_enabled else 'disabled'} (scale={self.metric_display_max_m}m)")
             elif key == ord('e'):
                 self.ensemble_enabled = not self.ensemble_enabled
                 print(f"Ensemble matching {'enabled' if self.ensemble_enabled else 'disabled'}")
