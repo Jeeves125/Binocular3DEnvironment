@@ -142,3 +142,22 @@ Delete these files to recalibrate.
 ## License
 
 MIT License - Feel free to use and modify as needed.
+
+
+
+## Commands to use for deep stereo
+cd C:\Users\joebe\Documents
+git clone https://github.com/princeton-vl/RAFT-Stereo.git
+
+cd C:\Users\joebe\Documents\RAFT-Stereo
+
+Invoke-WebRequest "https://www.dropbox.com/s/ftveifyqcomiwaq/models.zip?dl=1" -OutFile models.zip
+
+Expand-Archive .\models.zip -DestinationPath .\models -Force
+
+Get-ChildItem .\models
+
+cd C:\Users\joebe\Documents\Binocular3DEnvironment
+.\.venv\Scripts\Activate.ps1
+
+python stereo_deep.py --model raft --raft-root C:\Users\joebe\Documents\RAFT-Stereo --checkpoint C:\Users\joebe\Documents\RAFT-Stereo\models\raftstereo-middlebury.pth --calib stereo_calibration_refined.pkl --gpu

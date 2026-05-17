@@ -41,6 +41,7 @@ import cv2
 import numpy as np
 import urllib.request
 import pathlib
+from types import SimpleNamespace
 
 try:
     import torch
@@ -150,7 +151,7 @@ def try_load_psmnet(checkpoint_path, device='cuda'):
     raise ImportError('PSMNet implementation not found. Install a PSMNet package or adapt `try_load_psmnet`.')
 
 
-def try_load_raft(checkpoint_path, device='cuda'):
+def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
     """Attempt to load a RAFT-Stereo model from a known implementation.
 
     This tries common module names and classes. If not found, raises
@@ -159,12 +160,30 @@ def try_load_raft(checkpoint_path, device='cuda'):
     if torch is None:
         raise ImportError('PyTorch not available. Install torch with CUDA support to use deep models.')
 
+    if raft_root:
+        raft_root = os.path.abspath(raft_root)
+        if os.path.isdir(raft_root) and raft_root not in sys.path:
+            sys.path.insert(0, raft_root)
+
     candidates = [
+        'core.raft_stereo',
         'raft_stereo',
         'raft_stereo.models',
         'models.raft',
         'models.raft_stereo',
     ]
+    raft_args = SimpleNamespace(
+        corr_implementation='reg',
+        shared_backbone=False,
+        corr_levels=4,
+        corr_radius=4,
+        n_downsample=2,
+        context_norm='batch',
+        mixed_precision=(device == 'cuda'),
+        slow_fast_gru=False,
+        n_gru_layers=3,
+        hidden_dims=[128, 128, 128],
+    )
     for c in candidates:
         try:
             mod = __import__(c, fromlist=['*'])
@@ -172,14 +191,25 @@ def try_load_raft(checkpoint_path, device='cuda'):
             for cls_name in ('RAFTStereo', 'RAFTStereoModel', 'RAFT'):
                 if hasattr(mod, cls_name):
                     cls = getattr(mod, cls_name)
-                    model = cls()
+                    try:
+                        model = cls(raft_args)
+                    except TypeError:
+                        model = cls()
                     model = model.to(device)
                     if checkpoint_path and os.path.exists(checkpoint_path):
                         ck = torch.load(checkpoint_path, map_location=device)
+                        if isinstance(ck, dict) and 'model' in ck:
+                            ck = ck['model']
                         if 'state_dict' in ck:
-                            model.load_state_dict(ck['state_dict'])
+                            state_dict = ck['state_dict']
+                            if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
+                                state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
+                            model.load_state_dict(state_dict)
                         else:
-                            model.load_state_dict(ck)
+                            state_dict = ck
+                            if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
+                                state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
+                            model.load_state_dict(state_dict)
                     return model
         except Exception:
             continue
@@ -196,6 +226,8 @@ def run_raft_inference(left_img, right_img, model, device='cuda'):
         out = model(L, R)
         if isinstance(out, torch.Tensor):
             disp = out.squeeze().cpu().numpy()
+        elif isinstance(out, dict) and 'disp_preds' in out:
+            disp = out['disp_preds'][-1].squeeze().cpu().numpy()
         elif isinstance(out, dict) and 'disp' in out:
             disp = out['disp'].squeeze().cpu().numpy()
         elif isinstance(out, (list, tuple)):
@@ -229,6 +261,7 @@ def main():
     parser.add_argument('--checkpoint', help='Path to model checkpoint')
     parser.add_argument('--checkpoint-url', help='URL to download checkpoint from (optional)')
     parser.add_argument('--download-checkpoint', action='store_true', help='Download checkpoint before loading (requires --checkpoint-url)')
+    parser.add_argument('--raft-root', help='Path to a cloned RAFT-Stereo repository root (contains core/raft_stereo.py)')
     parser.add_argument('--calib', default='stereo_calibration.pkl', help='Stereo calibration pickle with rectification maps and Q')
     parser.add_argument('--left_camera_id', type=int, default=0)
     parser.add_argument('--right_camera_id', type=int, default=1)
@@ -271,11 +304,11 @@ def main():
             return
     elif args.model == 'raft':
         try:
-            model_impl = try_load_raft(args.checkpoint, device=device)
+            model_impl = try_load_raft(args.checkpoint, device=device, raft_root=args.raft_root)
             print('Loaded RAFT-Stereo model')
         except Exception as e:
             print('RAFT load failed:', e)
-            print('You can provide --checkpoint-url and --download-checkpoint to fetch a checkpoint, or install a RAFT-Stereo package.')
+            print('Clone the RAFT-Stereo repo and pass --raft-root <repo-root> so the script can import core.raft_stereo.RAFTStereo.')
             return
     else:
         print('Autodetect not implemented in scaffold; specify --model psmnet')
@@ -310,8 +343,11 @@ def main():
             Ls, Rs = L, R
 
         start = time.time()
-        # run model (PSMNet adapter)
-        disp = run_psmnet_inference(Ls, Rs, model_impl, device=device)
+        # run selected model adapter
+        if args.model == 'raft':
+            disp = run_raft_inference(Ls, Rs, model_impl, device=device)
+        else:
+            disp = run_psmnet_inference(Ls, Rs, model_impl, device=device)
         elapsed = time.time() - start
 
         # if we resized, upsample disparity back
