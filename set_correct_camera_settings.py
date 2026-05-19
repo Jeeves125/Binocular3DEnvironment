@@ -1,18 +1,61 @@
 import cv2
 import json
 import argparse
+import os
 
 parser = argparse.ArgumentParser(description='Lock common camera settings and preview')
 parser.add_argument('--id', type=int, default=0, help='camera id')
 parser.add_argument('--width', type=int, default=640)
 parser.add_argument('--height', type=int, default=480)
 parser.add_argument('--fps', type=int, default=30)
+parser.add_argument('--backend', choices=['auto', 'msmf', 'dshow', 'any'], default='auto')
 args = parser.parse_args()
 
-cap = cv2.VideoCapture(args.id)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
-cap.set(cv2.CAP_PROP_FPS, args.fps)
+def backend_candidates(backend_name):
+	if backend_name == 'msmf':
+		return [cv2.CAP_MSMF]
+	if backend_name == 'dshow':
+		return [cv2.CAP_DSHOW]
+	if backend_name == 'any':
+		return [cv2.CAP_ANY]
+
+	if os.name == 'nt':
+		return [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY]
+	return [cv2.CAP_ANY]
+
+
+def open_camera(camera_id, width, height, fps, backend_name):
+	backends = backend_candidates(backend_name)
+
+	for backend in backends:
+		cap = cv2.VideoCapture(camera_id, backend)
+		if not cap.isOpened():
+			cap.release()
+			continue
+
+		cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+		cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+		cap.set(cv2.CAP_PROP_FPS, fps)
+		cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+		# Warm up the stream; some Windows backends need a few reads before frames are valid.
+		for _ in range(5):
+			ret, _ = cap.read()
+			if ret:
+				return cap
+
+		cap.release()
+
+	raise RuntimeError(
+		f'Unable to open camera {camera_id} at {width}x{height}@{fps} using available OpenCV backends.'
+	)
+
+
+try:
+	cap = open_camera(args.id, args.width, args.height, args.fps, args.backend)
+except RuntimeError as exc:
+	print(exc)
+	raise SystemExit(1)
 
 # Try disabling auto exposure (may be backend-dependent)
 cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
@@ -36,7 +79,7 @@ print('Starting preview. Press S to save settings to camera_settings.json, Q to 
 while True:
 	ret, frame = cap.read()
 	if not ret:
-		print('Failed to read from camera')
+		print(f'Failed to read from camera {args.id}. Try --id with the other camera index, or run from a different backend if the device is busy.')
 		break
 
 	info = get_settings(cap)
