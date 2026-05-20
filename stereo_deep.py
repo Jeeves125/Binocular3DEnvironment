@@ -43,6 +43,7 @@ import pathlib
 from types import SimpleNamespace
 
 from RAFTStereo.core.raft_stereo import RAFTStereo
+from RAFTStereo.core.utils.utils import InputPadder
 
 try:
     import torch
@@ -198,15 +199,10 @@ def run_raft_inference(left_img, right_img, model, device='cuda'):
     with torch.no_grad():
         L = to_tensor(left_img, device, normalize=False)
         R = to_tensor(right_img, device, normalize=False)
-        orig_h = left_img.shape[0]
-        orig_w = left_img.shape[1]
-        pad_h = (32 - (orig_h % 32)) % 32
-        pad_w = (32 - (orig_w % 32)) % 32
-        if pad_h or pad_w:
-            L = torch.nn.functional.pad(L, (0, pad_w, 0, pad_h))
-            R = torch.nn.functional.pad(R, (0, pad_w, 0, pad_h))
+        padder = InputPadder(L.shape, divis_by=32)
+        L, R = padder.pad(L, R)
         try:
-            out = model(L, R, iters=12, test_mode=True)
+            out = model(L, R, iters=32, test_mode=True)
         except TypeError:
             out = model(L, R)
         if isinstance(out, torch.Tensor):
@@ -216,12 +212,12 @@ def run_raft_inference(left_img, right_img, model, device='cuda'):
         elif isinstance(out, dict) and 'disp' in out:
             disp = out['disp'].squeeze().cpu().numpy()
         elif isinstance(out, (list, tuple)):
-            # RAFT-Stereo demo returns (flow_low, flow_up); prefer the last/upscaled output.
+            # RAFT-Stereo demo returns (flow_low, flow_up); prefer the upsampled result.
             disp = out[-1].squeeze().cpu().numpy()
         else:
             raise RuntimeError('Unexpected RAFT output format')
     if disp.ndim >= 2:
-        disp = disp[:orig_h, :orig_w]
+        disp = padder.unpad(torch.from_numpy(disp[None, None])).squeeze().cpu().numpy()
     return disp
 
 
