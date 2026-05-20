@@ -360,10 +360,10 @@ def main():
         dnorm, disp_low, disp_high = normalize_disparity_for_display(disp)
         if Q is not None:
             depth = disparity_to_depth(disp, Q)
-            dcolor = cv2.applyColorMap(dnorm.astype(np.uint8), cv2.COLORMAP_INFERNO)
+            dcolor = cv2.cvtColor(dnorm.astype(np.uint8), cv2.COLOR_GRAY2BGR)
         else:
             depth = None
-            dcolor = cv2.applyColorMap(dnorm.astype(np.uint8), cv2.COLORMAP_INFERNO)
+            dcolor = cv2.cvtColor(dnorm.astype(np.uint8), cv2.COLOR_GRAY2BGR)
 
         left_r = cv2.resize(L, (320,240))
         right_r = cv2.resize(R, (320,240))
