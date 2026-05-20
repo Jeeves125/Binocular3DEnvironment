@@ -2,4 +2,4 @@
 /__pycache__
 /.venv
 auto_tune_log_*
-/ext_pairs
+*.pkl
