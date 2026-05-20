@@ -209,6 +209,32 @@ def run_raft_inference(left_img, right_img, model, device='cuda'):
     return disp
 
 
+def normalize_disparity_for_display(disparity):
+    """Map disparity to 0..255 using robust percentiles instead of raw min-max."""
+    disparity = np.asarray(disparity, dtype=np.float32)
+    valid_mask = np.isfinite(disparity)
+    display = np.zeros(disparity.shape, dtype=np.uint8)
+
+    if not np.any(valid_mask):
+        return display, None, None
+
+    valid_values = disparity[valid_mask]
+    low = float(np.percentile(valid_values, 5))
+    high = float(np.percentile(valid_values, 95))
+
+    if high <= low:
+        low = float(np.min(valid_values))
+        high = float(np.max(valid_values))
+
+    if high <= low:
+        return display, low, high
+
+    scaled = np.clip((disparity - low) / (high - low), 0.0, 1.0)
+    scaled[~valid_mask] = 0.0
+    display = (scaled * 255.0).astype(np.uint8)
+    return display, low, high
+
+
 def download_checkpoint(url, dest=None):
     """Download a checkpoint URL to `dest` (path or folder). Returns saved path."""
     if dest is None:
@@ -325,14 +351,12 @@ def main():
             disp = cv2.resize(disp, (w, h), interpolation=cv2.INTER_LINEAR)
 
         # Convert disparity->depth (requires Q)
+        dnorm, disp_low, disp_high = normalize_disparity_for_display(disp)
         if Q is not None:
             depth = disparity_to_depth(disp, Q)
-            # normalize for display
-            dnorm = cv2.normalize(disp, None, 0, 255, cv2.NORM_MINMAX)
             dcolor = cv2.applyColorMap(dnorm.astype(np.uint8), cv2.COLORMAP_INFERNO)
         else:
             depth = None
-            dnorm = cv2.normalize(disp, None, 0, 255, cv2.NORM_MINMAX)
             dcolor = cv2.applyColorMap(dnorm.astype(np.uint8), cv2.COLORMAP_INFERNO)
 
         left_r = cv2.resize(L, (320,240))
@@ -343,6 +367,8 @@ def main():
         out = np.vstack([top, bot])
 
         cv2.putText(out, f"Model: {args.model} time:{elapsed*1000:.0f}ms", (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+        if disp_low is not None and disp_high is not None:
+            cv2.putText(out, f"disp p5/p95: {disp_low:.2f}/{disp_high:.2f}", (10,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
         if depth is not None:
             meanZ = np.mean(depth[np.isfinite(depth)])
             cv2.putText(out, f"mean Z: {meanZ:.3f}", (300,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
