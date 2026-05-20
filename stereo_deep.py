@@ -162,8 +162,10 @@ def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
 
     if raft_root:
         raft_root = os.path.abspath(raft_root)
-        if os.path.isdir(raft_root) and raft_root not in sys.path:
-            sys.path.insert(0, raft_root)
+        path_candidates = [raft_root, os.path.dirname(raft_root)]
+        for path_candidate in path_candidates:
+            if os.path.isdir(path_candidate) and path_candidate not in sys.path:
+                sys.path.insert(0, path_candidate)
 
     candidates = [
         'core.raft_stereo',
@@ -184,6 +186,7 @@ def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
         n_gru_layers=3,
         hidden_dims=[128, 128, 128],
     )
+    import_errors = []
     for c in candidates:
         try:
             mod = __import__(c, fromlist=['*'])
@@ -211,10 +214,16 @@ def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
                                 state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
                             model.load_state_dict(state_dict)
                     return model
-        except Exception:
+        except Exception as e:
+            import_errors.append(f'{c}: {e}')
             continue
 
-    raise ImportError('RAFT-Stereo implementation not found. Install a RAFT-Stereo package or provide a compatible adapter.')
+    detail = '; '.join(import_errors) if import_errors else 'no candidate modules were importable'
+    raise ImportError(
+        'RAFT-Stereo implementation not found. Install a RAFT-Stereo package, '\
+        'verify the repo dependencies are installed, or provide a compatible adapter. '\
+        f'Import attempts: {detail}'
+    )
 
 
 def run_raft_inference(left_img, right_img, model, device='cuda'):

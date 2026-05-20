@@ -150,7 +150,7 @@ def main():
     calibrator = CameraCalibrator(checkerboard_size=(9, 6))
     
     # Calibrate both cameras
-    for camera_id in [0, 1]:
+    for camera_id in [1, 2]:
         camera_matrix, dist_coeffs = calibrator.calibrate_camera(camera_id, num_images=10)
         
         if camera_matrix is not None:

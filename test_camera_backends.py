@@ -20,18 +20,18 @@ backends_to_try = [
 for backend_id, backend_name in backends_to_try:
     print(f"\n--- Testing {backend_name} ---")
     try:
-        # Try camera 0
-        cap = cv2.VideoCapture(0, backend_id)
+        # Try camera 1
+        cap = cv2.VideoCapture(1, backend_id)
         if cap.isOpened():
             ret, frame = cap.read()
             if ret and frame is not None:
-                print(f"✓ SUCCESS: Camera 0 opened with {backend_name}")
+                print(f"✓ SUCCESS: Camera 1 opened with {backend_name}")
                 print(f"  Frame size: {frame.shape}")
             else:
                 print(f"✗ Camera opened but failed to read frame")
             cap.release()
         else:
-            print(f"✗ FAILED: Camera 0 could not be opened with {backend_name}")
+            print(f"✗ FAILED: Camera 1 could not be opened with {backend_name}")
     except Exception as e:
         print(f"✗ ERROR: {type(e).__name__}: {e}")
 

@@ -87,7 +87,7 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
             pass
         
         # Prefer full stereo calibration (rectification maps) if available
-        stereo_file = 'stereo_calibration.pkl'
+        stereo_file = 'stereo_test_refined.pkl'
         if os.path.exists(stereo_file):
             try:
                 with open(stereo_file, 'rb') as f:
@@ -728,5 +728,5 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
         print(f"Processed {frame_count} frames. Exiting...")
 
 if __name__ == "__main__":
-    mapper = CalibratedStereoDepthMapper(left_camera_id=0, right_camera_id=1, width=640, height=480)
+    mapper = CalibratedStereoDepthMapper(left_camera_id=1, right_camera_id=2, width=640, height=480)
     mapper.run()
