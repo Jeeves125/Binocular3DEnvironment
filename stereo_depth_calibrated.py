@@ -673,6 +673,25 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
             # Compute depth (returns raw 16S left disparity and display normalized)
             disp16, disp_display = self.compute_depth(left_gray, right_gray)
 
+            # If compute_depth used an ROI crop it may return smaller arrays.
+            # Pad them back into full-frame arrays so subsequent processing
+            # (shading, depth reprojection) can safely index into the color image.
+            h_full, w_full = left_gray.shape[:2]
+            if disp16 is not None and disp16.shape[:2] != (h_full, w_full):
+                roi = getattr(self, 'roi', None)
+                if roi is not None and len(roi) == 4:
+                    rx, ry, rw, rh = roi
+                    try:
+                        full_disp16 = np.full((h_full, w_full), np.min(disp16), dtype=disp16.dtype)
+                        full_disp_display = np.zeros((h_full, w_full), dtype=disp_display.dtype)
+                        full_disp16[ry:ry+rh, rx:rx+rw] = disp16
+                        full_disp_display[ry:ry+rh, rx:rx+rw] = disp_display
+                        disp16 = full_disp16
+                        disp_display = full_disp_display
+                    except Exception:
+                        # if padding fails, leave arrays as-is and hope caller handles shapes
+                        pass
+
             # Diagnostics
             min_disp = float(disp16.min()) / 16.0
             max_disp = float(disp16.max()) / 16.0
