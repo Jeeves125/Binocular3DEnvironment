@@ -32,6 +32,7 @@ Notes:
 """
 
 import argparse
+import importlib.util
 import os
 import sys
 import time
@@ -167,6 +168,28 @@ def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
             if os.path.isdir(path_candidate) and path_candidate not in sys.path:
                 sys.path.insert(0, path_candidate)
 
+    def _load_module_from_path(module_name, module_path):
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f'Unable to create import spec for {module_path}')
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _find_raft_module_paths(base_root):
+        candidates = [
+            ('core.raft_stereo', os.path.join(base_root, 'core', 'raft_stereo.py')),
+            ('raft_stereo', os.path.join(base_root, 'raft_stereo.py')),
+            ('raft_stereo.models', os.path.join(base_root, 'raft_stereo', 'models.py')),
+            ('models.raft_stereo', os.path.join(base_root, 'models', 'raft_stereo.py')),
+            ('models.raft', os.path.join(base_root, 'models', 'raft.py')),
+            ('core.raft', os.path.join(base_root, 'core', 'raft.py')),
+        ]
+        for module_name, module_path in candidates:
+            if os.path.isfile(module_path):
+                yield module_name, module_path
+
     candidates = [
         'core.raft_stereo',
         'raft_stereo',
@@ -217,6 +240,36 @@ def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
         except Exception as e:
             import_errors.append(f'{c}: {e}')
             continue
+
+    if raft_root:
+        for module_name, module_path in _find_raft_module_paths(raft_root):
+            try:
+                mod = _load_module_from_path(module_name, module_path)
+                for cls_name in ('RAFTStereo', 'RAFTStereoModel', 'RAFT'):
+                    if hasattr(mod, cls_name):
+                        cls = getattr(mod, cls_name)
+                        try:
+                            model = cls(raft_args)
+                        except TypeError:
+                            model = cls()
+                        model = model.to(device)
+                        if checkpoint_path and os.path.exists(checkpoint_path):
+                            ck = torch.load(checkpoint_path, map_location=device)
+                            if isinstance(ck, dict) and 'model' in ck:
+                                ck = ck['model']
+                            if 'state_dict' in ck:
+                                state_dict = ck['state_dict']
+                                if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
+                                    state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
+                                model.load_state_dict(state_dict)
+                            else:
+                                state_dict = ck
+                                if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
+                                    state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
+                                model.load_state_dict(state_dict)
+                        return model
+            except Exception as e:
+                import_errors.append(f'{module_name} ({module_path}): {e}')
 
     detail = '; '.join(import_errors) if import_errors else 'no candidate modules were importable'
     raise ImportError(
