@@ -355,6 +355,27 @@ def main():
             disp = run_psmnet_inference(Ls, Rs, model_impl, device=device)
         elapsed = time.time() - start
 
+        # Basic runtime diagnostics and polarity correction
+        disp_arr = np.asarray(disp, dtype=np.float32)
+        finite_mask = np.isfinite(disp_arr)
+        if np.any(finite_mask):
+            v = disp_arr[finite_mask]
+            p5 = float(np.percentile(v, 5))
+            p95 = float(np.percentile(v, 95))
+        else:
+            p5 = None
+            p95 = None
+
+        # If the bulk of disparities are negative, invert polarity (common when images are swapped)
+        if p95 is not None and p95 < 0:
+            disp_arr = -disp_arr
+            disp = disp_arr
+            # recompute percentiles after inversion
+            if np.any(finite_mask):
+                v = disp_arr[finite_mask]
+                p5 = float(np.percentile(v, 5))
+                p95 = float(np.percentile(v, 95))
+
         # Convert disparity->depth (requires Q)
         dnorm, disp_low, disp_high = normalize_disparity_for_display(disp)
         if Q is not None:
