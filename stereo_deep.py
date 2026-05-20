@@ -334,6 +334,9 @@ def main():
     right_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
 
     frame_idx = 0
+    swap_lr = False
+    debug_print_interval = 30
+    last_debug_print = -1
     while True:
         rl, left = left_cap.read()
         rr, right = right_cap.read()
@@ -345,7 +348,18 @@ def main():
 
         # RAFT-Stereo handles padding internally; keep the original image size.
         h, w = L.shape[:2]
-        Ls, Rs = L, R
+        Ls, Rs = (R, L) if swap_lr else (L, R)
+
+        # Quick runtime diagnostics to verify both camera frames differ and are being used
+        left_mean = float(np.mean(Ls))
+        right_mean = float(np.mean(Rs))
+        diff = cv2.absdiff(Ls, Rs)
+        diff_mean = float(np.mean(diff))
+        diff_max = int(np.max(diff))
+        # Print periodically to avoid flooding console
+        if frame_idx % debug_print_interval == 0 and frame_idx != last_debug_print:
+            print(f'Frame {frame_idx}: left_mean={left_mean:.1f} right_mean={right_mean:.1f} diff_mean={diff_mean:.1f} diff_max={diff_max}')
+            last_debug_print = frame_idx
 
         start = time.time()
         # run selected model adapter
@@ -403,6 +417,9 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
+        elif key == ord('i'):
+            swap_lr = not swap_lr
+            print('Toggled swap_lr ->', swap_lr)
         elif key == ord('s'):
             cv2.imwrite(f'disp_{frame_idx}.png', dcolor)
             if depth is not None:
