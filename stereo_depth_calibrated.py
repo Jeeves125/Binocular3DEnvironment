@@ -698,8 +698,17 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
             right_display = cv2.resize(right_frame, (320, 240))
             depth_display = cv2.resize(depth_color, (320, 240))
 
+            # also show the original normalized disparity as a grayscale depthmap
+            try:
+                depth_gray_bgr = cv2.cvtColor(disp_display, cv2.COLOR_GRAY2BGR)
+            except Exception:
+                # if disp_display is not single-channel, fallback to converting the display
+                depth_gray_bgr = cv2.cvtColor(self.apply_colormap(disp_display), cv2.COLOR_BGR2GRAY)
+                depth_gray_bgr = cv2.cvtColor(depth_gray_bgr, cv2.COLOR_GRAY2BGR)
+            depth_gray_bgr = cv2.resize(depth_gray_bgr, (320, 240))
+
             top_row = np.hstack([left_display, right_display])
-            bottom_row = np.hstack([depth_display, np.zeros_like(depth_display)])
+            bottom_row = np.hstack([depth_display, depth_gray_bgr])
             full_display = np.vstack([top_row, bottom_row])
 
             # Overlay diagnostics text
