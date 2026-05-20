@@ -197,8 +197,11 @@ def run_raft_inference(left_img, right_img, model, device='cuda'):
     """Adapter for RAFT-Stereo style models. Expects model(left,right) -> disparity tensor."""
     model.eval()
     with torch.no_grad():
-        L = to_tensor(left_img, device, normalize=False)
-        R = to_tensor(right_img, device, normalize=False)
+        # Use grayscale-only inputs so the model relies less on color/brightness cues from clothing.
+        left_gray = cv2.cvtColor(left_img, cv2.COLOR_BGR2GRAY)
+        right_gray = cv2.cvtColor(right_img, cv2.COLOR_BGR2GRAY)
+        L = to_tensor(cv2.cvtColor(left_gray, cv2.COLOR_GRAY2BGR), device, normalize=False)
+        R = to_tensor(cv2.cvtColor(right_gray, cv2.COLOR_GRAY2BGR), device, normalize=False)
         padder = InputPadder(L.shape, divis_by=32)
         L, R = padder.pad(L, R)
         try:
