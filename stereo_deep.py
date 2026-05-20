@@ -75,13 +75,17 @@ def rectify_frames(left, right, left_map1, left_map2, right_map1, right_map2):
     return L, R
 
 
-def to_tensor(img, device='cuda'):
+def to_tensor(img, device='cuda', normalize=True):
     # img: HxW or HxWx3 BGR uint8
     if img.ndim == 2:
-        arr = img.astype(np.float32) / 255.0
+        arr = img.astype(np.float32)
+        if normalize:
+            arr = arr / 255.0
         t = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0)
     else:
-        arr = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        arr = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
+        if normalize:
+            arr = arr / 255.0
         t = torch.from_numpy(arr.transpose(2,0,1)).unsqueeze(0)
     if device and torch is not None:
         t = t.to(device)
@@ -192,9 +196,19 @@ def run_raft_inference(left_img, right_img, model, device='cuda'):
     """Adapter for RAFT-Stereo style models. Expects model(left,right) -> disparity tensor."""
     model.eval()
     with torch.no_grad():
-        L = to_tensor(left_img, device)
-        R = to_tensor(right_img, device)
-        out = model(L, R)
+        L = to_tensor(left_img, device, normalize=False)
+        R = to_tensor(right_img, device, normalize=False)
+        orig_h = left_img.shape[0]
+        orig_w = left_img.shape[1]
+        pad_h = (32 - (orig_h % 32)) % 32
+        pad_w = (32 - (orig_w % 32)) % 32
+        if pad_h or pad_w:
+            L = torch.nn.functional.pad(L, (0, pad_w, 0, pad_h))
+            R = torch.nn.functional.pad(R, (0, pad_w, 0, pad_h))
+        try:
+            out = model(L, R, iters=12, test_mode=True)
+        except TypeError:
+            out = model(L, R)
         if isinstance(out, torch.Tensor):
             disp = out.squeeze().cpu().numpy()
         elif isinstance(out, dict) and 'disp_preds' in out:
@@ -202,10 +216,12 @@ def run_raft_inference(left_img, right_img, model, device='cuda'):
         elif isinstance(out, dict) and 'disp' in out:
             disp = out['disp'].squeeze().cpu().numpy()
         elif isinstance(out, (list, tuple)):
-            # Some RAFT variants return flow-like outputs; attempt first element
-            disp = out[0].squeeze().cpu().numpy()
+            # RAFT-Stereo demo returns (flow_low, flow_up); prefer the last/upscaled output.
+            disp = out[-1].squeeze().cpu().numpy()
         else:
             raise RuntimeError('Unexpected RAFT output format')
+    if disp.ndim >= 2:
+        disp = disp[:orig_h, :orig_w]
     return disp
 
 
@@ -328,15 +344,9 @@ def main():
 
         L, R = rectify_frames(left, right, left_map1, left_map2, right_map1, right_map2)
 
-        # ensure sizes are multiple of 16 for many models
+        # RAFT-Stereo handles padding internally; keep the original image size.
         h, w = L.shape[:2]
-        target_h = (h // 16) * 16
-        target_w = (w // 16) * 16
-        if target_h != h or target_w != w:
-            Ls = cv2.resize(L, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-            Rs = cv2.resize(R, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-        else:
-            Ls, Rs = L, R
+        Ls, Rs = L, R
 
         start = time.time()
         # run selected model adapter
@@ -345,10 +355,6 @@ def main():
         else:
             disp = run_psmnet_inference(Ls, Rs, model_impl, device=device)
         elapsed = time.time() - start
-
-        # if we resized, upsample disparity back
-        if (target_h, target_w) != (h, w):
-            disp = cv2.resize(disp, (w, h), interpolation=cv2.INTER_LINEAR)
 
         # Convert disparity->depth (requires Q)
         dnorm, disp_low, disp_high = normalize_disparity_for_display(disp)
