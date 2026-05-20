@@ -32,9 +32,7 @@ Notes:
 """
 
 import argparse
-import importlib.util
 import os
-import sys
 import time
 import pickle
 
@@ -43,6 +41,8 @@ import numpy as np
 import urllib.request
 import pathlib
 from types import SimpleNamespace
+
+from RAFTStereo.core.raft_stereo import RAFTStereo
 
 try:
     import torch
@@ -153,50 +153,10 @@ def try_load_psmnet(checkpoint_path, device='cuda'):
 
 
 def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
-    """Attempt to load a RAFT-Stereo model from a known implementation.
-
-    This tries common module names and classes. If not found, raises
-    ImportError with guidance.
-    """
+    """Load RAFT-Stereo from the installed RAFTStereo package."""
     if torch is None:
         raise ImportError('PyTorch not available. Install torch with CUDA support to use deep models.')
 
-    if raft_root:
-        raft_root = os.path.abspath(raft_root)
-        path_candidates = [raft_root, os.path.dirname(raft_root)]
-        for path_candidate in path_candidates:
-            if os.path.isdir(path_candidate) and path_candidate not in sys.path:
-                sys.path.insert(0, path_candidate)
-
-    def _load_module_from_path(module_name, module_path):
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f'Unable to create import spec for {module_path}')
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return module
-
-    def _find_raft_module_paths(base_root):
-        candidates = [
-            ('core.raft_stereo', os.path.join(base_root, 'core', 'raft_stereo.py')),
-            ('raft_stereo', os.path.join(base_root, 'raft_stereo.py')),
-            ('raft_stereo.models', os.path.join(base_root, 'raft_stereo', 'models.py')),
-            ('models.raft_stereo', os.path.join(base_root, 'models', 'raft_stereo.py')),
-            ('models.raft', os.path.join(base_root, 'models', 'raft.py')),
-            ('core.raft', os.path.join(base_root, 'core', 'raft.py')),
-        ]
-        for module_name, module_path in candidates:
-            if os.path.isfile(module_path):
-                yield module_name, module_path
-
-    candidates = [
-        'core.raft_stereo',
-        'raft_stereo',
-        'raft_stereo.models',
-        'models.raft',
-        'models.raft_stereo',
-    ]
     raft_args = SimpleNamespace(
         corr_implementation='reg',
         shared_backbone=False,
@@ -209,74 +169,23 @@ def try_load_raft(checkpoint_path, device='cuda', raft_root=None):
         n_gru_layers=3,
         hidden_dims=[128, 128, 128],
     )
-    import_errors = []
-    for c in candidates:
-        try:
-            mod = __import__(c, fromlist=['*'])
-            # common class names
-            for cls_name in ('RAFTStereo', 'RAFTStereoModel', 'RAFT'):
-                if hasattr(mod, cls_name):
-                    cls = getattr(mod, cls_name)
-                    try:
-                        model = cls(raft_args)
-                    except TypeError:
-                        model = cls()
-                    model = model.to(device)
-                    if checkpoint_path and os.path.exists(checkpoint_path):
-                        ck = torch.load(checkpoint_path, map_location=device)
-                        if isinstance(ck, dict) and 'model' in ck:
-                            ck = ck['model']
-                        if 'state_dict' in ck:
-                            state_dict = ck['state_dict']
-                            if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
-                                state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
-                            model.load_state_dict(state_dict)
-                        else:
-                            state_dict = ck
-                            if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
-                                state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
-                            model.load_state_dict(state_dict)
-                    return model
-        except Exception as e:
-            import_errors.append(f'{c}: {e}')
-            continue
-
-    if raft_root:
-        for module_name, module_path in _find_raft_module_paths(raft_root):
-            try:
-                mod = _load_module_from_path(module_name, module_path)
-                for cls_name in ('RAFTStereo', 'RAFTStereoModel', 'RAFT'):
-                    if hasattr(mod, cls_name):
-                        cls = getattr(mod, cls_name)
-                        try:
-                            model = cls(raft_args)
-                        except TypeError:
-                            model = cls()
-                        model = model.to(device)
-                        if checkpoint_path and os.path.exists(checkpoint_path):
-                            ck = torch.load(checkpoint_path, map_location=device)
-                            if isinstance(ck, dict) and 'model' in ck:
-                                ck = ck['model']
-                            if 'state_dict' in ck:
-                                state_dict = ck['state_dict']
-                                if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
-                                    state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
-                                model.load_state_dict(state_dict)
-                            else:
-                                state_dict = ck
-                                if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
-                                    state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
-                                model.load_state_dict(state_dict)
-                        return model
-            except Exception as e:
-                import_errors.append(f'{module_name} ({module_path}): {e}')
-
-    detail = '; '.join(import_errors) if import_errors else 'no candidate modules were importable'
-    raise ImportError(
-        'RAFT-Stereo implementation not found. Install a RAFT-Stereo package, '\
-        'verify the repo dependencies are installed, or provide a compatible adapter. '\
-        f'Import attempts: {detail}'
-    )
+    model = RAFTStereo(raft_args)
+    model = model.to(device)
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        ck = torch.load(checkpoint_path, map_location=device)
+        if isinstance(ck, dict) and 'model' in ck:
+            ck = ck['model']
+        if isinstance(ck, dict) and 'state_dict' in ck:
+            state_dict = ck['state_dict']
+            if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
+                state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
+            model.load_state_dict(state_dict)
+        else:
+            state_dict = ck
+            if isinstance(state_dict, dict) and state_dict and all(isinstance(key, str) and key.startswith('module.') for key in state_dict.keys()):
+                state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
+            model.load_state_dict(state_dict)
+    return model
 
 
 def run_raft_inference(left_img, right_img, model, device='cuda'):
@@ -323,7 +232,6 @@ def main():
     parser.add_argument('--checkpoint', help='Path to model checkpoint')
     parser.add_argument('--checkpoint-url', help='URL to download checkpoint from (optional)')
     parser.add_argument('--download-checkpoint', action='store_true', help='Download checkpoint before loading (requires --checkpoint-url)')
-    parser.add_argument('--raft-root', help='Path to a cloned RAFT-Stereo repository root (contains core/raft_stereo.py)')
     parser.add_argument('--calib', default='stereo_calibration.pkl', help='Stereo calibration pickle with rectification maps and Q')
     parser.add_argument('--left_camera_id', type=int, default=0)
     parser.add_argument('--right_camera_id', type=int, default=1)
@@ -366,11 +274,11 @@ def main():
             return
     elif args.model == 'raft':
         try:
-            model_impl = try_load_raft(args.checkpoint, device=device, raft_root=args.raft_root)
+            model_impl = try_load_raft(args.checkpoint, device=device)
             print('Loaded RAFT-Stereo model')
         except Exception as e:
             print('RAFT load failed:', e)
-            print('Clone the RAFT-Stereo repo and pass --raft-root <repo-root> so the script can import core.raft_stereo.RAFTStereo.')
+            print('Make sure the RAFTStereo package is installed and importable in this environment.')
             return
     else:
         print('Autodetect not implemented in scaffold; specify --model psmnet')
