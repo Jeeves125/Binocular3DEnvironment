@@ -417,6 +417,35 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
         colored = cv2.applyColorMap(disp8, cv2.COLORMAP_JET)
         return colored
 
+    def shade_color_by_depth(self, color_bgr, depth_m=None, disp8=None, max_m=None, fade_power=1.0):
+        """Return a color image derived from `color_bgr` where pixel brightness
+        is reduced according to depth. If `depth_m` (meters) is provided, brightness
+        = 1 - clip(depth/max_m). If `disp8` (0-255 normalized disparity) is
+        provided, brightness = disp8/255 (higher disparity -> closer -> brighter).
+
+        `fade_power` applies a gamma-like curve to the brightness to control falloff.
+        """
+        if color_bgr is None:
+            return None
+        # ensure inputs are numpy arrays
+        col = color_bgr.astype(np.float32)
+
+        if depth_m is not None:
+            max_m = max_m or self.metric_display_max_m
+            alpha = 1.0 - np.clip(depth_m.astype(np.float32) / float(max_m), 0.0, 1.0)
+            alpha[~np.isfinite(depth_m)] = 0.0
+        elif disp8 is not None:
+            alpha = (disp8.astype(np.float32) / 255.0)
+        else:
+            alpha = np.ones(col.shape[:2], dtype=np.float32)
+
+        if fade_power != 1.0:
+            alpha = np.power(alpha, float(fade_power))
+
+        # apply per-pixel brightness to color channels
+        shaded = (col * alpha[..., None]).astype(np.uint8)
+        return shaded
+
     def auto_tune_on_frame(self, left_gray, right_gray, try_block_sizes=(5,7,9), try_num_disparities=(16*6,16*8,16*10)):
         """Quick automatic tuning of StereoSGBM on a single frame.
 
@@ -652,16 +681,17 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
             mean_disp = float(vals.mean()) if vals.size else 0.0
             std_disp = float(vals.std()) if vals.size else 0.0
 
-            # Apply colormap (grayscale BGR)
+            # Create a depth-shaded color image using the original left frame.
+            # Near objects retain their original colors; farther objects fade to dark.
             if self.metric_display_enabled:
                 try:
                     depth_m = self.disparity_to_depth_meters(disp16)
-                    depth_color = self.depth_to_colormap(depth_m)
+                    depth_color = self.shade_color_by_depth(left_frame, depth_m=depth_m, max_m=self.metric_display_max_m, fade_power=1.0)
                 except Exception as e:
                     print("Metric depth unavailable:", e)
-                    depth_color = self.apply_colormap(disp_display)
+                    depth_color = self.shade_color_by_depth(left_frame, disp8=disp_display, fade_power=1.0)
             else:
-                depth_color = self.apply_colormap(disp_display)
+                depth_color = self.shade_color_by_depth(left_frame, disp8=disp_display, fade_power=1.0)
 
             # Resize for display
             left_display = cv2.resize(left_frame, (320, 240))
