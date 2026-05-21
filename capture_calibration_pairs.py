@@ -33,9 +33,16 @@ def backend_from_name(name):
         return cv2.CAP_GSTREAMER
     raise ValueError(f"Unsupported backend '{name}'")
 
+
+def parse_camera_source(raw):
+    text = str(raw).strip()
+    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+        return int(text)
+    return text
+
 parser = argparse.ArgumentParser()
-parser.add_argument('--left', type=int, default=0)
-parser.add_argument('--right', type=int, default=1)
+parser.add_argument('--left', type=str, default='0')
+parser.add_argument('--right', type=str, default='1')
 parser.add_argument('--out', type=str, default='calibration_pairs')
 parser.add_argument('--count', type=int, default=20)
 parser.add_argument('--width', type=int, default=640)
@@ -44,15 +51,17 @@ parser.add_argument('--backend', type=str, default='auto', choices=['auto', 'any
 args = parser.parse_args()
 
 backend = backend_from_name(args.backend)
+left_src = parse_camera_source(args.left)
+right_src = parse_camera_source(args.right)
 
 os.makedirs(args.out, exist_ok=True)
 
 if backend is None:
-    capL = cv2.VideoCapture(args.left)
-    capR = cv2.VideoCapture(args.right)
+    capL = cv2.VideoCapture(left_src)
+    capR = cv2.VideoCapture(right_src)
 else:
-    capL = cv2.VideoCapture(args.left, backend)
-    capR = cv2.VideoCapture(args.right, backend)
+    capL = cv2.VideoCapture(left_src, backend)
+    capR = cv2.VideoCapture(right_src, backend)
 for cap in (capL, capR):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)

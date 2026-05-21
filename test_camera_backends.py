@@ -6,6 +6,7 @@ nodes because camera index 1 does not always map to /dev/video1.
 
 import glob
 import itertools
+import os
 import platform
 import subprocess
 import sys
@@ -41,6 +42,31 @@ def probe_capture(source, backend_id=None, warmup_reads=4):
 
 def list_linux_video_nodes():
     return sorted(glob.glob("/dev/video*"))
+
+
+def summarize_opencv_build():
+    info = cv2.getBuildInformation()
+    wanted = ("Video I/O", "GStreamer", "V4L", "FFMPEG")
+    print("OpenCV Video I/O build summary:")
+    for line in info.splitlines():
+        if any(token in line for token in wanted):
+            print("  " + line)
+
+
+def print_linux_device_permissions(video_nodes):
+    print("\nLinux device access check:")
+    uid = os.geteuid()
+    gid = os.getegid()
+    print(f"  uid={uid} gid={gid}")
+    if not video_nodes:
+        print("  no /dev/video* nodes found")
+        return
+
+    for node in video_nodes:
+        exists = os.path.exists(node)
+        can_read = os.access(node, os.R_OK)
+        can_write = os.access(node, os.W_OK)
+        print(f"  {node}: exists={exists} read={can_read} write={can_write}")
 
 
 def print_v4l2_devices_if_available():
@@ -89,6 +115,14 @@ def test_dual_capture(src_a, src_b, backend_id=None):
             right.release()
 
 
+def test_gstreamer_pipeline_for_node(video_node):
+    pipeline = (
+        f"v4l2src device={video_node} ! "
+        "video/x-raw,framerate=30/1 ! videoconvert ! appsink drop=1"
+    )
+    return probe_capture(pipeline, cv2.CAP_GSTREAMER)
+
+
 def main():
     os_name = platform.system().lower()
 
@@ -105,6 +139,7 @@ def main():
         ]
         sources = list(range(0, 8))
     else:
+        summarize_opencv_build()
         backends = [
             (cv2.CAP_V4L2, "V4L2"),
             (cv2.CAP_GSTREAMER, "GSTREAMER"),
@@ -112,6 +147,7 @@ def main():
         ]
         video_nodes = list_linux_video_nodes()
         print("Detected video nodes:", video_nodes if video_nodes else "none")
+        print_linux_device_permissions(video_nodes)
         print_v4l2_devices_if_available()
         sources = list(range(0, 8)) + video_nodes
 
@@ -173,6 +209,17 @@ def main():
     if not dual_ok:
         print("No backend/source pair could read two cameras at once.")
         print("Try lowering resolution/FPS and ensure cameras are on separate USB buses if possible.")
+
+    if not os_name.startswith("win") and video_nodes:
+        print("\n" + "=" * 60)
+        print("GStreamer pipeline test (device path)")
+        print("=" * 60)
+        for node in video_nodes:
+            ok, shape, err = test_gstreamer_pipeline_for_node(node)
+            if ok:
+                print(f"OK   node={node:<12} shape={shape}")
+            else:
+                print(f"FAIL node={node:<12} reason={err}")
 
 
 if __name__ == "__main__":

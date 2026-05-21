@@ -257,6 +257,17 @@ def can_open_camera(source, backend=None):
             cap.release()
 
 
+def parse_camera_source(raw):
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if text == "":
+        return None
+    if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+        return int(text)
+    return text
+
+
 def auto_detect_two_indices(backend=None, max_index=8):
     working = []
     for idx in range(max_index):
@@ -269,8 +280,8 @@ def auto_detect_two_indices(backend=None, max_index=8):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stereo depth mapping from two webcams")
-    parser.add_argument("--left", type=int, default=None, help="Left camera index")
-    parser.add_argument("--right", type=int, default=None, help="Right camera index")
+    parser.add_argument("--left", type=str, default=None, help="Left camera source (index, /dev/videoX, or pipeline)")
+    parser.add_argument("--right", type=str, default=None, help="Right camera source (index, /dev/videoX, or pipeline)")
     parser.add_argument("--width", type=int, default=640, help="Capture width")
     parser.add_argument("--height", type=int, default=480, help="Capture height")
     parser.add_argument(
@@ -285,8 +296,8 @@ if __name__ == "__main__":
 
     backend = backend_from_name(args.backend)
 
-    left_id = args.left
-    right_id = args.right
+    left_id = parse_camera_source(args.left)
+    right_id = parse_camera_source(args.right)
 
     if left_id is None or right_id is None:
         detected = auto_detect_two_indices(backend=backend, max_index=args.max_index)
