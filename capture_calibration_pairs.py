@@ -8,7 +8,30 @@ Press SPACE to capture a pair, 'q' to quit.
 import cv2
 import os
 import argparse
+import platform
 from datetime import datetime
+
+
+def backend_from_name(name):
+    backend_name = (name or "auto").lower()
+    if backend_name == "auto":
+        system = platform.system().lower()
+        if system.startswith("win"):
+            return cv2.CAP_DSHOW
+        if system.startswith("linux"):
+            return cv2.CAP_V4L2
+        return None
+    if backend_name == "any":
+        return None
+    if backend_name == "dshow":
+        return cv2.CAP_DSHOW
+    if backend_name == "msmf":
+        return cv2.CAP_MSMF
+    if backend_name == "v4l2":
+        return cv2.CAP_V4L2
+    if backend_name == "gstreamer":
+        return cv2.CAP_GSTREAMER
+    raise ValueError(f"Unsupported backend '{name}'")
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--left', type=int, default=0)
@@ -17,12 +40,19 @@ parser.add_argument('--out', type=str, default='calibration_pairs')
 parser.add_argument('--count', type=int, default=20)
 parser.add_argument('--width', type=int, default=640)
 parser.add_argument('--height', type=int, default=480)
+parser.add_argument('--backend', type=str, default='auto', choices=['auto', 'any', 'dshow', 'msmf', 'v4l2', 'gstreamer'])
 args = parser.parse_args()
+
+backend = backend_from_name(args.backend)
 
 os.makedirs(args.out, exist_ok=True)
 
-capL = cv2.VideoCapture(args.left)
-capR = cv2.VideoCapture(args.right)
+if backend is None:
+    capL = cv2.VideoCapture(args.left)
+    capR = cv2.VideoCapture(args.right)
+else:
+    capL = cv2.VideoCapture(args.left, backend)
+    capR = cv2.VideoCapture(args.right, backend)
 for cap in (capL, capR):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)

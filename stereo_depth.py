@@ -5,9 +5,11 @@ Captures from left and right webcams, computes and displays depth map in real-ti
 
 import cv2
 import numpy as np
+import argparse
+import platform
 
 class StereoDepthMapper:
-    def __init__(self, left_camera_id=0, right_camera_id=1, width=640, height=480):
+    def __init__(self, left_camera_id=0, right_camera_id=1, width=640, height=480, backend=None):
         """
         Initialize stereo depth mapper with two webcams.
         
@@ -17,8 +19,13 @@ class StereoDepthMapper:
             width: Frame width
             height: Frame height
         """
-        self.left_cap = cv2.VideoCapture(left_camera_id)
-        self.right_cap = cv2.VideoCapture(right_camera_id)
+        if backend is None:
+            self.left_cap = cv2.VideoCapture(left_camera_id)
+            self.right_cap = cv2.VideoCapture(right_camera_id)
+        else:
+            self.left_cap = cv2.VideoCapture(left_camera_id, backend)
+            self.right_cap = cv2.VideoCapture(right_camera_id, backend)
+        self.backend = backend
         
         # Set camera properties
         for cap in [self.left_cap, self.right_cap]:
@@ -208,6 +215,94 @@ class StereoDepthMapper:
         self.right_cap.release()
         cv2.destroyAllWindows()
 
+
+def backend_from_name(name):
+    backend_name = (name or "auto").lower()
+    if backend_name == "auto":
+        system = platform.system().lower()
+        if system.startswith("win"):
+            return cv2.CAP_DSHOW
+        if system.startswith("linux"):
+            return cv2.CAP_V4L2
+        return None
+    if backend_name == "any":
+        return None
+    if backend_name == "dshow":
+        return cv2.CAP_DSHOW
+    if backend_name == "msmf":
+        return cv2.CAP_MSMF
+    if backend_name == "v4l2":
+        return cv2.CAP_V4L2
+    if backend_name == "gstreamer":
+        return cv2.CAP_GSTREAMER
+    raise ValueError(f"Unsupported backend '{name}'")
+
+
+def can_open_camera(source, backend=None):
+    cap = None
+    try:
+        if backend is None:
+            cap = cv2.VideoCapture(source)
+        else:
+            cap = cv2.VideoCapture(source, backend)
+        if not cap.isOpened():
+            return False
+        for _ in range(4):
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                return True
+        return False
+    finally:
+        if cap is not None:
+            cap.release()
+
+
+def auto_detect_two_indices(backend=None, max_index=8):
+    working = []
+    for idx in range(max_index):
+        if can_open_camera(idx, backend=backend):
+            working.append(idx)
+        if len(working) >= 2:
+            break
+    return working
+
+
 if __name__ == "__main__":
-    mapper = StereoDepthMapper(left_camera_id=0, right_camera_id=1, width=640, height=480)
+    parser = argparse.ArgumentParser(description="Stereo depth mapping from two webcams")
+    parser.add_argument("--left", type=int, default=None, help="Left camera index")
+    parser.add_argument("--right", type=int, default=None, help="Right camera index")
+    parser.add_argument("--width", type=int, default=640, help="Capture width")
+    parser.add_argument("--height", type=int, default=480, help="Capture height")
+    parser.add_argument(
+        "--backend",
+        type=str,
+        default="auto",
+        choices=["auto", "any", "dshow", "msmf", "v4l2", "gstreamer"],
+        help="OpenCV camera backend",
+    )
+    parser.add_argument("--max-index", type=int, default=8, help="Max camera index to scan")
+    args = parser.parse_args()
+
+    backend = backend_from_name(args.backend)
+
+    left_id = args.left
+    right_id = args.right
+
+    if left_id is None or right_id is None:
+        detected = auto_detect_two_indices(backend=backend, max_index=args.max_index)
+        if len(detected) < 2:
+            raise RuntimeError(
+                "Could not auto-detect two working cameras. "
+                "Pass --left and --right explicitly after running test_camera_backends.py"
+            )
+        left_id, right_id = detected[0], detected[1]
+        print(f"Auto-detected cameras: left={left_id}, right={right_id}")
+
+    mapper = StereoDepthMapper(
+        left_camera_id=left_id,
+        right_camera_id=right_id,
+        width=args.width,
+        height=args.height,
+        backend=backend,
+    )
     mapper.run()
