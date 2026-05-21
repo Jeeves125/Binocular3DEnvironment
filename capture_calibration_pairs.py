@@ -31,6 +31,8 @@ def backend_from_name(name):
         return cv2.CAP_V4L2
     if backend_name == "gstreamer":
         return cv2.CAP_GSTREAMER
+    if backend_name == "ffmpeg":
+        return cv2.CAP_FFMPEG
     raise ValueError(f"Unsupported backend '{name}'")
 
 
@@ -40,6 +42,16 @@ def parse_camera_source(raw):
         return int(text)
     return text
 
+
+def source_for_backend(source, backend):
+    if backend == cv2.CAP_FFMPEG:
+        if isinstance(source, int):
+            return f"v4l2:/dev/video{source}"
+        source_text = str(source)
+        if source_text.startswith("/dev/video"):
+            return f"v4l2:{source_text}"
+    return source
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--left', type=str, default='0')
 parser.add_argument('--right', type=str, default='1')
@@ -47,12 +59,14 @@ parser.add_argument('--out', type=str, default='calibration_pairs')
 parser.add_argument('--count', type=int, default=20)
 parser.add_argument('--width', type=int, default=640)
 parser.add_argument('--height', type=int, default=480)
-parser.add_argument('--backend', type=str, default='auto', choices=['auto', 'any', 'dshow', 'msmf', 'v4l2', 'gstreamer'])
+parser.add_argument('--backend', type=str, default='auto', choices=['auto', 'any', 'dshow', 'msmf', 'v4l2', 'gstreamer', 'ffmpeg'])
 args = parser.parse_args()
 
 backend = backend_from_name(args.backend)
 left_src = parse_camera_source(args.left)
 right_src = parse_camera_source(args.right)
+left_src = source_for_backend(left_src, backend)
+right_src = source_for_backend(right_src, backend)
 
 os.makedirs(args.out, exist_ok=True)
 

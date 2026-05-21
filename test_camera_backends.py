@@ -123,6 +123,38 @@ def test_gstreamer_pipeline_for_node(video_node):
     return probe_capture(pipeline, cv2.CAP_GSTREAMER)
 
 
+def ffmpeg_v4l2_source_for(source):
+    if isinstance(source, int):
+        return f"v4l2:/dev/video{source}"
+    text = str(source)
+    if text.startswith("/dev/video"):
+        return f"v4l2:{text}"
+    return text
+
+
+def v4l2_stream_smoke_test(video_node):
+    try:
+        result = subprocess.run(
+            [
+                "v4l2-ctl",
+                "-d",
+                video_node,
+                "--stream-mmap=3",
+                "--stream-count=10",
+                "--stream-to=/dev/null",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        ok = result.returncode == 0
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        return ok, out if out else err
+    except FileNotFoundError:
+        return False, "v4l2-ctl not installed"
+
+
 def main():
     os_name = platform.system().lower()
 
@@ -143,6 +175,7 @@ def main():
         backends = [
             (cv2.CAP_V4L2, "V4L2"),
             (cv2.CAP_GSTREAMER, "GSTREAMER"),
+            (cv2.CAP_FFMPEG, "FFMPEG"),
             (None, "ANY"),
         ]
         video_nodes = list_linux_video_nodes()
@@ -220,6 +253,27 @@ def main():
                 print(f"OK   node={node:<12} shape={shape}")
             else:
                 print(f"FAIL node={node:<12} reason={err}")
+
+        print("\n" + "=" * 60)
+        print("FFmpeg v4l2 URI test")
+        print("=" * 60)
+        for node in video_nodes:
+            ff_src = ffmpeg_v4l2_source_for(node)
+            ok, shape, err = probe_capture(ff_src, cv2.CAP_FFMPEG)
+            if ok:
+                print(f"OK   source={ff_src:<20} shape={shape}")
+            else:
+                print(f"FAIL source={ff_src:<20} reason={err}")
+
+        print("\n" + "=" * 60)
+        print("v4l2-ctl stream smoke test")
+        print("=" * 60)
+        for node in video_nodes:
+            ok, info = v4l2_stream_smoke_test(node)
+            if ok:
+                print(f"OK   node={node:<12} {info.splitlines()[-1] if info else 'stream ok'}")
+            else:
+                print(f"FAIL node={node:<12} {info}")
 
 
 if __name__ == "__main__":

@@ -235,7 +235,19 @@ def backend_from_name(name):
         return cv2.CAP_V4L2
     if backend_name == "gstreamer":
         return cv2.CAP_GSTREAMER
+    if backend_name == "ffmpeg":
+        return cv2.CAP_FFMPEG
     raise ValueError(f"Unsupported backend '{name}'")
+
+
+def source_for_backend(source, backend):
+    if backend == cv2.CAP_FFMPEG:
+        if isinstance(source, int):
+            return f"v4l2:/dev/video{source}"
+        source_text = str(source)
+        if source_text.startswith("/dev/video"):
+            return f"v4l2:{source_text}"
+    return source
 
 
 def can_open_camera(source, backend=None):
@@ -288,7 +300,7 @@ if __name__ == "__main__":
         "--backend",
         type=str,
         default="auto",
-        choices=["auto", "any", "dshow", "msmf", "v4l2", "gstreamer"],
+        choices=["auto", "any", "dshow", "msmf", "v4l2", "gstreamer", "ffmpeg"],
         help="OpenCV camera backend",
     )
     parser.add_argument("--max-index", type=int, default=8, help="Max camera index to scan")
@@ -308,6 +320,9 @@ if __name__ == "__main__":
             )
         left_id, right_id = detected[0], detected[1]
         print(f"Auto-detected cameras: left={left_id}, right={right_id}")
+
+    left_id = source_for_backend(left_id, backend)
+    right_id = source_for_backend(right_id, backend)
 
     mapper = StereoDepthMapper(
         left_camera_id=left_id,
