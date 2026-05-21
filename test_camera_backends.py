@@ -201,47 +201,47 @@ def main():
     print("=" * 60)
     if not working:
         print("No working camera source found.")
-        print("Check power, USB bandwidth, and whether another process holds the camera.")
-        return
+        print("Continuing with low-level Linux diagnostics below.")
+    else:
+        for backend_id, backend_name in backends:
+            sources_for_backend = sorted({str(item[2]) for item in working if item[1] == backend_name})
+            if sources_for_backend:
+                print(f"{backend_name}: {sources_for_backend}")
 
-    for backend_id, backend_name in backends:
-        sources_for_backend = sorted({str(item[2]) for item in working if item[1] == backend_name})
-        if sources_for_backend:
-            print(f"{backend_name}: {sources_for_backend}")
+    if working:
+        print("\n" + "=" * 60)
+        print("Dual-camera validation")
+        print("=" * 60)
+        dual_ok = False
 
-    print("\n" + "=" * 60)
-    print("Dual-camera validation")
-    print("=" * 60)
-    dual_ok = False
+        for backend_id, backend_name in backends:
+            usable_sources = [item[2] for item in working if item[1] == backend_name]
+            unique_sources = []
+            seen = set()
+            for src in usable_sources:
+                src_key = str(src)
+                if src_key not in seen:
+                    seen.add(src_key)
+                    unique_sources.append(src)
 
-    for backend_id, backend_name in backends:
-        usable_sources = [item[2] for item in working if item[1] == backend_name]
-        unique_sources = []
-        seen = set()
-        for src in usable_sources:
-            src_key = str(src)
-            if src_key not in seen:
-                seen.add(src_key)
-                unique_sources.append(src)
+            if len(unique_sources) < 2:
+                continue
 
-        if len(unique_sources) < 2:
-            continue
+            for src_a, src_b in itertools.combinations(unique_sources, 2):
+                ok, info = test_dual_capture(src_a, src_b, backend_id)
+                if ok:
+                    print(f"OK   backend={backend_name} left={src_a} right={src_b} {info}")
+                    print("Use these values in your stereo scripts.")
+                    dual_ok = True
+                    break
+                print(f"FAIL backend={backend_name} left={src_a} right={src_b} reason={info}")
 
-        for src_a, src_b in itertools.combinations(unique_sources, 2):
-            ok, info = test_dual_capture(src_a, src_b, backend_id)
-            if ok:
-                print(f"OK   backend={backend_name} left={src_a} right={src_b} {info}")
-                print("Use these values in your stereo scripts.")
-                dual_ok = True
+            if dual_ok:
                 break
-            print(f"FAIL backend={backend_name} left={src_a} right={src_b} reason={info}")
 
-        if dual_ok:
-            break
-
-    if not dual_ok:
-        print("No backend/source pair could read two cameras at once.")
-        print("Try lowering resolution/FPS and ensure cameras are on separate USB buses if possible.")
+        if not dual_ok:
+            print("No backend/source pair could read two cameras at once.")
+            print("Try lowering resolution/FPS and ensure cameras are on separate USB buses if possible.")
 
     if not os_name.startswith("win") and video_nodes:
         print("\n" + "=" * 60)
