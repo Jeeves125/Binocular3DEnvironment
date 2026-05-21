@@ -9,7 +9,7 @@ import argparse
 import platform
 
 class StereoDepthMapper:
-    def __init__(self, left_camera_id=0, right_camera_id=1, width=640, height=480, backend=None):
+    def __init__(self, left_camera_id=0, right_camera_id=1, width=640, height=480, format=None, backend=None):
         """
         Initialize stereo depth mapper with two webcams.
         
@@ -18,14 +18,26 @@ class StereoDepthMapper:
             right_camera_id: Index of right camera
             width: Frame width
             height: Frame height
+            format: Video format
+            backend: OpenCV video backend
         """
         if backend is None:
             self.left_cap = cv2.VideoCapture(left_camera_id)
             self.right_cap = cv2.VideoCapture(right_camera_id)
+            self.backend = None
         else:
-            self.left_cap = cv2.VideoCapture(left_camera_id, backend)
-            self.right_cap = cv2.VideoCapture(right_camera_id, backend)
-        self.backend = backend
+            cv2_backend = backend_from_name(backend)
+            self.left_cap = cv2.VideoCapture(left_camera_id, cv2_backend)
+            self.right_cap = cv2.VideoCapture(right_camera_id, cv2_backend)
+            self.backend = cv2_backend
+            
+        self.format = format.lower() if format else None
+        if format == 'mjpg':
+            for cap in [self.left_cap, self.right_cap]:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
         
         # Set camera properties
         for cap in [self.left_cap, self.right_cap]:

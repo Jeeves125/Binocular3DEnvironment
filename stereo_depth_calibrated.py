@@ -3,6 +3,8 @@ Stereo Depth Map with Camera Calibration
 Uses pre-calibrated camera parameters for improved depth map accuracy.
 """
 
+import argparse
+
 import cv2
 import numpy as np
 import pickle
@@ -13,9 +15,9 @@ import time
 from stereo_depth import StereoDepthMapper
 
 class CalibratedStereoDepthMapper(StereoDepthMapper):
-    def __init__(self, left_camera_id=0, right_camera_id=1, width=640, height=480):
+    def __init__(self, left_camera_id=0, right_camera_id=1, width=640, height=480, format='MJPG', backend='v4l2'):
         """Initialize with calibration support."""
-        super().__init__(left_camera_id, right_camera_id, width, height)
+        super().__init__(left_camera_id, right_camera_id, width, height, format, backend)
         
         self.left_calibration = self.load_calibration(left_camera_id)
         self.right_calibration = self.load_calibration(right_camera_id)
@@ -728,5 +730,11 @@ class CalibratedStereoDepthMapper(StereoDepthMapper):
         print(f"Processed {frame_count} frames. Exiting...")
 
 if __name__ == "__main__":
-    mapper = CalibratedStereoDepthMapper(left_camera_id=1, right_camera_id=2, width=640, height=480)
+    parser = argparse.ArgumentParser(description="Calibrated Stereo Depth Mapping with OpenCV")
+    parser.add_argument('--left_id', type=int, default=1, help='Camera ID for left camera (default: 1)')
+    parser.add_argument('--right_id', type=int, default=2, help='Camera ID for right camera (default: 2)')
+    parser.add_argument('--format', type=str, default='MJPG', help='Video format (default: MJPG)')
+    parser.add_argument('--backend', type=str, default='v4l2', help='OpenCV video backend (default: v4l2)')
+    args = parser.parse_args()
+    mapper = CalibratedStereoDepthMapper(left_camera_id=args.left_id, right_camera_id=args.right_id, width=640, height=480, format=args.format, backend=args.backend)
     mapper.run()

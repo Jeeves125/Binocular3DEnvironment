@@ -8,7 +8,8 @@ parser.add_argument('--id', type=int, default=0, help='camera id')
 parser.add_argument('--width', type=int, default=640)
 parser.add_argument('--height', type=int, default=480)
 parser.add_argument('--fps', type=int, default=30)
-parser.add_argument('--backend', choices=['auto', 'msmf', 'dshow', 'any'], default='auto')
+parser.add_argument('--backend', choices=['auto', 'msmf', 'dshow', 'v4l2', 'any'], default='auto')
+parser.add_argument('--format', choices=['none', 'mjpg'], default='none')
 args = parser.parse_args()
 
 def backend_candidates(backend_name):
@@ -16,8 +17,11 @@ def backend_candidates(backend_name):
 		return [cv2.CAP_MSMF]
 	if backend_name == 'dshow':
 		return [cv2.CAP_DSHOW]
+	if backend_name == 'v4l2':
+		return [cv2.CAP_V4L2]
 	if backend_name == 'any':
 		return [cv2.CAP_ANY]
+
 
 	if os.name == 'nt':
 		return [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY]
@@ -29,6 +33,12 @@ def open_camera(camera_id, width, height, fps, backend_name):
 
 	for backend in backends:
 		cap = cv2.VideoCapture(camera_id, backend)
+  
+		if format == 'mjpg':
+			cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+			cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+			cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+  
 		if not cap.isOpened():
 			cap.release()
 			continue

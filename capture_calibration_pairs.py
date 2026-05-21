@@ -56,6 +56,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--left', type=str, default='0')
 parser.add_argument('--right', type=str, default='1')
 parser.add_argument('--out', type=str, default='calibration_pairs')
+parser.add_argument('--format', type=str, default='none', choices=['none', 'mjpg'])
 parser.add_argument('--count', type=int, default=20)
 parser.add_argument('--width', type=int, default=640)
 parser.add_argument('--height', type=int, default=480)
@@ -67,6 +68,7 @@ left_src = parse_camera_source(args.left)
 right_src = parse_camera_source(args.right)
 left_src = source_for_backend(left_src, backend)
 right_src = source_for_backend(right_src, backend)
+format = args.format.lower()
 
 os.makedirs(args.out, exist_ok=True)
 
@@ -79,6 +81,10 @@ else:
 for cap in (capL, capR):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+    if format == 'mjpg':
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 count = 0
 print('Press SPACE to capture synchronized pair. Press q to quit.')
