@@ -80,10 +80,78 @@ def print_v4l2_devices_if_available():
         if result.returncode == 0 and result.stdout.strip():
             print("\nv4l2-ctl --list-devices:")
             print(result.stdout.strip())
+            listed_nodes = []
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("/dev/video"):
+                    listed_nodes.append(stripped)
+            return listed_nodes
         else:
             print("\nv4l2-ctl not available or returned no output.")
+            return []
     except FileNotFoundError:
         print("\nv4l2-ctl is not installed. Install v4l-utils for richer diagnostics.")
+        return []
+
+
+def v4l2_capture_capability(video_node):
+    """Return whether node advertises capture formats via v4l2-ctl."""
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", "-d", video_node, "--list-formats-ext"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        ok = result.returncode == 0
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        return ok, out if out else err
+    except FileNotFoundError:
+        return False, "v4l2-ctl not installed"
+
+
+def v4l2_current_format(video_node):
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", "-d", video_node, "--get-fmt-video"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        ok = result.returncode == 0
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        return ok, out if out else err
+    except FileNotFoundError:
+        return False, "v4l2-ctl not installed"
+
+
+def v4l2_stream_with_format(video_node, width, height, pixelformat, stream_count=30):
+    try:
+        result = subprocess.run(
+            [
+                "v4l2-ctl",
+                "-d",
+                video_node,
+                f"--set-fmt-video=width={width},height={height},pixelformat={pixelformat}",
+                "--stream-mmap=3",
+                f"--stream-count={stream_count}",
+                "--stream-to=/dev/null",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=25,
+        )
+        ok = result.returncode == 0
+        out = (result.stdout or "").strip()
+        err = (result.stderr or "").strip()
+        return ok, out if out else err
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    except FileNotFoundError:
+        return False, "v4l2-ctl not installed"
 
 
 def test_dual_capture(src_a, src_b, backend_id=None):
@@ -181,8 +249,23 @@ def main():
         video_nodes = list_linux_video_nodes()
         print("Detected video nodes:", video_nodes if video_nodes else "none")
         print_linux_device_permissions(video_nodes)
-        print_v4l2_devices_if_available()
-        sources = list(range(0, 8)) + video_nodes
+        listed_nodes = print_v4l2_devices_if_available()
+        if listed_nodes:
+            sources = listed_nodes
+            print("Using v4l2-ctl listed nodes for probing.")
+        else:
+            sources = video_nodes
+
+        print("\n" + "=" * 60)
+        print("v4l2 capture capability")
+        print("=" * 60)
+        for node in sources:
+            ok, info = v4l2_capture_capability(node)
+            if ok:
+                first_line = info.splitlines()[0] if info else "formats listed"
+                print(f"OK   node={node:<12} {first_line}")
+            else:
+                print(f"FAIL node={node:<12} {info}")
 
     working = []
     for backend_id, backend_name in backends:
@@ -274,6 +357,30 @@ def main():
                 print(f"OK   node={node:<12} {info.splitlines()[-1] if info else 'stream ok'}")
             else:
                 print(f"FAIL node={node:<12} {info}")
+
+        print("\n" + "=" * 60)
+        print("v4l2 current format")
+        print("=" * 60)
+        for node in video_nodes:
+            ok, info = v4l2_current_format(node)
+            if ok:
+                print(f"OK   node={node:<12} {info.splitlines()[0] if info else 'current format reported'}")
+            else:
+                print(f"FAIL node={node:<12} {info}")
+
+        print("\n" + "=" * 60)
+        print("v4l2 explicit format stream test")
+        print("=" * 60)
+        for node in video_nodes:
+            for width, height in ((640, 480), (1280, 720)):
+                for pixelformat in ("MJPG", "YUYV", "NV12"):
+                    ok, info = v4l2_stream_with_format(node, width, height, pixelformat)
+                    tag = f"{width}x{height} {pixelformat}"
+                    if ok:
+                        print(f"OK   node={node:<12} {tag:<16} {info.splitlines()[-1] if info else 'stream ok'}")
+                        break
+                    else:
+                        print(f"FAIL node={node:<12} {tag:<16} {info}")
 
 
 if __name__ == "__main__":
