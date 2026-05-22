@@ -8,7 +8,7 @@ This uses a 9 * 7 checkerboard pattern to give the cameras the information they 
 Note: In the camera part of the project AI helped a lot, since I had no idea how to use OpenCV (cv2), or how to do the math for more complex techniques like ROI mapping, or how to do the math or cv2 operations for ensemble matching. I used AI to make the files that would help with these techniques, and transferring it to a final depth map, and tweaked the code when I saw errors, or wanted it to be easier for me to understand.
 
 
-# Commands to use for deep stereo
+# Commands to use for deep stereo (It lwk doesn't give accurate results, I probably did something wrong.)
 cd C:\Users\joebe\Documents git clone https://github.com/princeton-vl/RAFT-Stereo.git
 
 cd C:\Users\joebe\Documents\RAFT-Stereo

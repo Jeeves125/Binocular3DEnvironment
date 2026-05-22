@@ -14,6 +14,7 @@ class StereoDepthMapper:
         Initialize stereo depth mapper with two webcams.
         
         Args:
+            load_cams: Whether to load cameras
             left_camera_id: Index of left camera
             right_camera_id: Index of right camera
             width: Frame width

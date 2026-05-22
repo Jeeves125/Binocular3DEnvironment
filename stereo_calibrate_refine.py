@@ -30,6 +30,7 @@ parser.add_argument('--checker_x', type=int, default=9)
 parser.add_argument('--checker_y', type=int, default=6)
 parser.add_argument('--square_size', type=float, default=0.025)
 parser.add_argument('--remove_percent', type=float, default=20.0, help='Percent of worst pairs to remove')
+parser.add_argument('--remove_until_error', type=float, default=0.0, help='Remove worst pairs until average error is below this threshold (overrides --remove_percent if > 0)')
 parser.add_argument('--min_pairs', type=int, default=8, help='Minimum pairs to keep')
 parser.add_argument('--out', type=str, default='stereo_calibration_refined.pkl')
 args = parser.parse_args()
@@ -99,15 +100,26 @@ for i in range(n):
     pair_errors.append((i, (errL+errR)/2.0))
 
 pair_errors.sort(key=lambda x: x[1], reverse=True)
-print('Top 10 worst pairs (index, error_px):')
-for idx, e in pair_errors[:10]:
+print('Top 100 worst pairs (index, error_px):')
+for idx, e in pair_errors[:100 if len(pair_errors) > 100 else len(pair_errors)]:
     print(idx, filenames[idx][0], filenames[idx][1], f'{e:.3f}')
 
-if args.remove_percent <= 0:
-    print('No removal requested (--remove_percent <= 0). Exiting after analysis.')
+if args.remove_percent <= 0 and args.remove_until_error <= 0:
+    print('No removal requested (--remove_percent <= 0 and --remove_until_error <= 0). Exiting after analysis.')
     raise SystemExit(0)
 
-remove_count = int(np.floor(n * (args.remove_percent / 100.0)))
+if args.remove_until_error > 0:
+    # Remove pairs until the average error is below the threshold
+    total_error = sum(e for _, e in pair_errors)
+    avg_error = total_error / len(pair_errors) if pair_errors else 0
+    remove_count = 0
+    while avg_error > args.remove_until_error and remove_count < len(pair_errors):
+        remove_count += 1
+        total_error -= pair_errors[remove_count - 1][1]
+        avg_error = total_error / (len(pair_errors) - remove_count) if len(pair_errors) - remove_count else 0
+else:
+    remove_count = int(np.floor(n * (args.remove_percent / 100.0)))
+    
 keep_count = n - remove_count
 if keep_count < args.min_pairs:
     remove_count = n - args.min_pairs

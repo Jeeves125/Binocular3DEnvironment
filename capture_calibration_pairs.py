@@ -103,17 +103,17 @@ while True:
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q'):
         break
-    if key == ord(' '):
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        left_name = os.path.join(args.out, f'left_{ts}.png')
-        right_name = os.path.join(args.out, f'right_{ts}.png')
-        cv2.imwrite(left_name, frameL)
-        cv2.imwrite(right_name, frameR)
-        count += 1
-        print(f'Saved pair {count}:', left_name, right_name)
-        if count >= args.count:
-            print('Captured requested number of pairs.')
-            break
+    # if key == ord(' '):
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    left_name = os.path.join(args.out, f'left_{ts}.png')
+    right_name = os.path.join(args.out, f'right_{ts}.png')
+    cv2.imwrite(left_name, frameL)
+    cv2.imwrite(right_name, frameR)
+    count += 1
+    print(f'Saved pair {count}:', left_name, right_name)
+    if count >= args.count:
+        print('Captured requested number of pairs.')
+        break
 
 capL.release()
 capR.release()
