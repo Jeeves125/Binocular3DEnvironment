@@ -16,6 +16,7 @@ import os
 import pickle
 import argparse
 from glob import glob
+from concurrent.futures import ThreadPoolExecutor
 
 def reproj_error(mtx, dist, rvec, tvec, objp, imgpts):
     imgpts2, _ = cv2.projectPoints(objp, rvec, tvec, mtx, dist)
@@ -32,6 +33,8 @@ parser.add_argument('--square_size', type=float, default=0.025)
 parser.add_argument('--remove_percent', type=float, default=20.0, help='Percent of worst pairs to remove')
 parser.add_argument('--remove_until_error', type=float, default=0.0, help='Remove worst pairs until average error is below this threshold (overrides --remove_percent if > 0)')
 parser.add_argument('--min_pairs', type=int, default=8, help='Minimum pairs to keep')
+parser.add_argument('--workers', type=int, default=0, help='Number of parallel workers for corner detection (0 = use CPU count)')
+parser.add_argument('--opencv_threads', type=int, default=0, help='OpenCV internal thread count (0 = leave default)')
 parser.add_argument('--out', type=str, default='stereo_calibration_refined.pkl')
 args = parser.parse_args()
 
@@ -52,36 +55,67 @@ objp = np.zeros((checkerboard[0]*checkerboard[1], 3), np.float32)
 objp[:, :2] = np.mgrid[0:checkerboard[0], 0:checkerboard[1]].T.reshape(-1, 2)
 objp *= args.square_size
 
+if args.opencv_threads > 0:
+    cv2.setNumThreads(args.opencv_threads)
+
 objpoints = []
 imgpointsL = []
 imgpointsR = []
 filenames = []
 img_shape = None
 
-print('Detecting corners in pairs...')
-for lf, rf in pairs:
+def detect_pair(pair):
+    lf, rf = pair
     L = cv2.imread(lf)
     R = cv2.imread(rf)
     if L is None or R is None:
-        continue
+        return None
+
     grayL = cv2.cvtColor(L, cv2.COLOR_BGR2GRAY)
     grayR = cv2.cvtColor(R, cv2.COLOR_BGR2GRAY)
-    if img_shape is None:
-        img_shape = grayL.shape[::-1]
 
     retL, cornersL = cv2.findChessboardCorners(grayL, checkerboard, None)
     retR, cornersR = cv2.findChessboardCorners(grayR, checkerboard, None)
-    if retL and retR:
-        term = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-        cornersL = cv2.cornerSubPix(grayL, cornersL, (11,11), (-1,-1), term)
-        cornersR = cv2.cornerSubPix(grayR, cornersR, (11,11), (-1,-1), term)
-        objpoints.append(objp)
-        imgpointsL.append(cornersL)
-        imgpointsR.append(cornersR)
-        filenames.append((lf, rf))
-        print('OK:', os.path.basename(lf), os.path.basename(rf))
-    else:
-        print('Skip (corners not found both):', os.path.basename(lf), os.path.basename(rf))
+    if not (retL and retR):
+        return {
+            'ok': False,
+            'lf': lf,
+            'rf': rf,
+            'img_shape': grayL.shape[::-1],
+        }
+
+    term = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    cornersL = cv2.cornerSubPix(grayL, cornersL, (11, 11), (-1, -1), term)
+    cornersR = cv2.cornerSubPix(grayR, cornersR, (11, 11), (-1, -1), term)
+    return {
+        'ok': True,
+        'lf': lf,
+        'rf': rf,
+        'obj': objp,
+        'cornersL': cornersL,
+        'cornersR': cornersR,
+        'img_shape': grayL.shape[::-1],
+    }
+
+print('Detecting corners in pairs...')
+worker_count = args.workers if args.workers > 0 else (os.cpu_count() or 1)
+print(f'Using {worker_count} worker(s) for corner detection')
+
+with ThreadPoolExecutor(max_workers=worker_count) as executor:
+    for result in executor.map(detect_pair, pairs):
+        if result is None:
+            continue
+        if img_shape is None:
+            img_shape = result['img_shape']
+
+        if result['ok']:
+            objpoints.append(result['obj'])
+            imgpointsL.append(result['cornersL'])
+            imgpointsR.append(result['cornersR'])
+            filenames.append((result['lf'], result['rf']))
+            print('OK:', os.path.basename(result['lf']), os.path.basename(result['rf']))
+        else:
+            print('Skip (corners not found both):', os.path.basename(result['lf']), os.path.basename(result['rf']))
 
 n = len(objpoints)
 print(f'Found {n} valid pairs')
@@ -89,8 +123,11 @@ if n < args.min_pairs:
     print('Not enough valid pairs for calibration. Need at least', args.min_pairs); raise SystemExit(1)
 
 print('Calibrating cameras individually...')
-retL, mtxL, distL, rvecsL, tvecsL = cv2.calibrateCamera(objpoints, imgpointsL, img_shape, None, None)
-retR, mtxR, distR, rvecsR, tvecsR = cv2.calibrateCamera(objpoints, imgpointsR, img_shape, None, None)
+with ThreadPoolExecutor(max_workers=2) as executor:
+    left_future = executor.submit(cv2.calibrateCamera, objpoints, imgpointsL, img_shape, None, None)
+    right_future = executor.submit(cv2.calibrateCamera, objpoints, imgpointsR, img_shape, None, None)
+    retL, mtxL, distL, rvecsL, tvecsL = left_future.result()
+    retR, mtxR, distR, rvecsR, tvecsR = right_future.result()
 
 print('Computing per-pair reprojection errors...')
 pair_errors = []
@@ -141,8 +178,11 @@ for i in range(n):
 
 print(f'Removing {remove_count} worst pairs; keeping {len(good_obj)} pairs and re-running calibration...')
 
-retL2, mtxL2, distL2, rvecsL2, tvecsL2 = cv2.calibrateCamera(good_obj, good_imgL, img_shape, None, None)
-retR2, mtxR2, distR2, rvecsR2, tvecsR2 = cv2.calibrateCamera(good_obj, good_imgR, img_shape, None, None)
+with ThreadPoolExecutor(max_workers=2) as executor:
+    left_future = executor.submit(cv2.calibrateCamera, good_obj, good_imgL, img_shape, None, None)
+    right_future = executor.submit(cv2.calibrateCamera, good_obj, good_imgR, img_shape, None, None)
+    retL2, mtxL2, distL2, rvecsL2, tvecsL2 = left_future.result()
+    retR2, mtxR2, distR2, rvecsR2, tvecsR2 = right_future.result()
 
 criteria = (cv2.TERM_CRITERIA_MAX_ITER + cv2.TERM_CRITERIA_EPS, 100, 1e-5)
 flags = 0

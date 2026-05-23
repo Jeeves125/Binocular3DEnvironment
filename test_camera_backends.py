@@ -21,10 +21,10 @@ for backend_id, backend_name in backends_to_try:
     print(f"\n--- Testing {backend_name} ---")
     try:
         # Try camera 1
-        cap = cv2.VideoCapture("/dev/video0", backend_id)
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap = cv2.VideoCapture(-1, backend_id)
+        # cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
         if cap.isOpened():
             ret, frame = cap.read()
